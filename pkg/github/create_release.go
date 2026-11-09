@@ -4,12 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 
-	ghErrors "github.com/github/github-mcp-server/v2/pkg/errors"
 	"github.com/github/github-mcp-server/v2/pkg/inventory"
 	"github.com/github/github-mcp-server/v2/pkg/translations"
 	"github.com/github/github-mcp-server/v2/pkg/utils"
-	"github.com/google/go-github/v92/github"
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -33,6 +32,16 @@ type CreateReleaseOutput struct {
 	TargetCommitish string `json:"target_commitish,omitempty"`
 	Name            string `json:"name,omitempty"`
 	HTMLURL         string `json:"html_url,omitempty"`
+	Draft           bool   `json:"draft"`
+	Prerelease      bool   `json:"prerelease"`
+}
+
+// releaseCreateRequest is the body of POST /repos/{owner}/{repo}/releases.
+type releaseCreateRequest struct {
+	TagName         string `json:"tag_name"`
+	TargetCommitish string `json:"target_commitish,omitempty"`
+	Name            string `json:"name,omitempty"`
+	Body            string `json:"body,omitempty"`
 	Draft           bool   `json:"draft"`
 	Prerelease      bool   `json:"prerelease"`
 }
@@ -105,40 +114,32 @@ func CreateRelease(t translations.TranslationHelperFunc) inventory.ServerTool {
 				return nil, nil, fmt.Errorf("failed to get GitHub client: %w", err)
 			}
 
-			release := &github.RepositoryRelease{
-				TagName:    new(input.TagName),
-				Draft:      new(input.Draft),
-				Prerelease: new(input.Prerelease),
-			}
-			if input.TargetCommitish != "" {
-				release.TargetCommitish = new(input.TargetCommitish)
-			}
-			if input.Name != "" {
-				release.Name = new(input.Name)
-			}
-			if input.Body != "" {
-				release.Body = new(input.Body)
-			}
-
-			created, resp, err := client.Repositories.CreateRelease(ctx, input.Owner, input.Repo, release)
+			req, err := client.NewRequest(
+				ctx,
+				http.MethodPost,
+				fmt.Sprintf("repos/%s/%s/releases", input.Owner, input.Repo),
+				&releaseCreateRequest{
+					TagName:         input.TagName,
+					TargetCommitish: input.TargetCommitish,
+					Name:            input.Name,
+					Body:            input.Body,
+					Draft:           input.Draft,
+					Prerelease:      input.Prerelease,
+				},
+			)
 			if err != nil {
-				return ghErrors.NewGitHubAPIErrorResponse(ctx,
-					"failed to create release",
-					resp,
-					err,
-				), nil, nil
+				return utils.NewToolResultError(fmt.Sprintf("failed to build request: %v", err)), nil, nil
 			}
-			defer func() { _ = resp.Body.Close() }()
 
-			out := &CreateReleaseOutput{
-				ID:              created.GetID(),
-				TagName:         created.GetTagName(),
-				TargetCommitish: created.GetTargetCommitish(),
-				Name:            created.GetName(),
-				HTMLURL:         created.GetHTMLURL(),
-				Draft:           created.GetDraft(),
-				Prerelease:      created.GetPrerelease(),
+			out := &CreateReleaseOutput{}
+			resp, err := client.Do(req, out)
+			if resp != nil && resp.Body != nil {
+				defer func() { _ = resp.Body.Close() }()
 			}
+			if err != nil {
+				return utils.NewToolResultError(fmt.Sprintf("failed to create release: %v", err)), nil, nil
+			}
+
 			r, err := json.Marshal(out)
 			if err != nil {
 				return nil, nil, fmt.Errorf("failed to marshal response: %w", err)
