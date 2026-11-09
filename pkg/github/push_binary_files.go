@@ -281,6 +281,7 @@ func PushBinaryFiles(t translations.TranslationHelperFunc) inventory.ServerTool 
 // createBase64Blob stores base64 content as a git blob and returns its SHA.
 func createBase64Blob(ctx context.Context, client *github.Client, owner, repo, contentBase64 string) (string, error) {
 	req, err := client.NewRequest(
+		ctx,
 		http.MethodPost,
 		fmt.Sprintf("repos/%s/%s/git/blobs", owner, repo),
 		&blobCreateRequest{Content: contentBase64, Encoding: "base64"},
@@ -289,7 +290,7 @@ func createBase64Blob(ctx context.Context, client *github.Client, owner, repo, c
 		return "", err
 	}
 	var out blobCreateResponse
-	resp, err := client.Do(ctx, req, &out)
+	resp, err := client.Do(req, &out)
 	if resp != nil && resp.Body != nil {
 		defer func() { _ = resp.Body.Close() }()
 	}
